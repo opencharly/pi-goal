@@ -60,12 +60,20 @@ The same Pi agent keeps running normal turns in the same session context until i
   -> trigger an agent turn
   -> account time/tokens on turn_end
   -> queue another continuation on agent_end while active
+  -> while a background subagent run is in flight, withhold the continuation so
+     the agent is never pestered into parallel work while waiting on results
   -> stop when update_goal marks complete, user pauses/clears, or budget is hit
 ```
 
+## Continuation behavior
+
+Each continuation is more than a bare "continue": it tells the agent to continue with its TODOs, follow the rules in the project's `AGENTS.md` (and `CLAUDE.md` where present), and read the relevant skills before acting — then re-injects the objective, budget, and completion audit.
+
+While a background subagent run is in flight (observed via pi-subagents' shared extension event bus, `subagent:async-started` / `subagent:async-complete` / `subagent:process-terminal`), the continuation is withheld: the agent is waiting on results and a "continue" would pester it into parallel work. The continuation resumes normally once the pending runs complete and their results are processed. Runs are keyed by id, with a stale-entry safety valve so a lost completion event can never block continuation forever.
+
 ## Completion behavior
 
-The model is instructed to audit completion against real evidence before calling `update_goal`. The `update_goal` tool deliberately accepts only `status: "complete"`; pausing, resuming, clearing, and budget limiting are controlled by the user or extension runtime. The final turn is still accounted even when the model completes the goal mid-turn.
+The model is instructed to audit completion against real evidence before calling `update_goal`, and full completion of every tracked TODO is mandatory: the continuation audit requires checking the `todo` tool list, and `update_goal` refuses `status: "complete"` while the last observed todo list still has open (`[pending]` or `[in_progress]`) items. The `update_goal` tool deliberately accepts only `status: "complete"`; pausing, resuming, clearing, and budget limiting are controlled by the user or extension runtime. The final turn is still accounted even when the model completes the goal mid-turn.
 
 ## State
 

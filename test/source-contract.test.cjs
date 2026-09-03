@@ -37,3 +37,37 @@ test("README documents the model-set goal and completion accounting contracts", 
 	assert.match(readme, /`create_goal` tool: model can set or replace the current goal only when explicitly requested/);
 	assert.match(readme, /The final turn is still accounted even when the model completes the goal mid-turn/);
 });
+
+test("continuation prompt drives TODOs, AGENTS.md, and skills before acting", () => {
+	assert.ok(indexSource.includes("Continue with your TODOs, follow the rules in the project's AGENTS.md"));
+	assert.ok(indexSource.includes("and read the relevant skills before acting"));
+});
+
+test("agent_end withholds continuation while a background subagent is pending", () => {
+	assert.ok(indexSource.includes('SUBAGENT_ASYNC_STARTED_EVENT = "subagent:async-started"'));
+	assert.ok(indexSource.includes('SUBAGENT_ASYNC_COMPLETE_EVENT = "subagent:async-complete"'));
+	assert.ok(indexSource.includes("pi.events?.on?.(SUBAGENT_ASYNC_STARTED_EVENT, markPendingSubagentLaunched)"));
+	assert.ok(indexSource.includes("if (hasPendingSubagentWork()) return;"));
+	const start = indexSource.indexOf('pi.on("agent_end"');
+	assert.ok(start >= 0, "agent_end handler present");
+	const end = indexSource.indexOf("\t});", start);
+	assert.ok(end > start, "agent_end handler closes");
+	const handler = indexSource.slice(start, end);
+	assert.ok(handler.includes("ctx.hasPendingMessages()"), "pending-message guard kept");
+	assert.ok(handler.includes("hasPendingSubagentWork()"), "subagent guard inside agent_end");
+});
+
+test("update_goal refuses completion while the tracked todo list has open items", () => {
+	assert.ok(indexSource.includes("OPEN_TODO_STATUS_PATTERN"));
+	assert.ok(indexSource.includes("pending|in_progress"));
+	assert.ok(indexSource.includes("hasTodoObservation && lastTodoObservationHasOpen"));
+	assert.ok(indexSource.includes("The goal cannot be declared reached while the tracked todo list still has open items"));
+	assert.ok(indexSource.includes("Full completion of every tracked TODO is mandatory before the goal is reached"));
+	assert.ok(indexSource.includes("TODO_TOOL_NAME"));
+});
+
+test("todo observations reset at session boundaries", () => {
+	assert.ok(indexSource.includes("pendingSubagentRuns.clear();"));
+	assert.ok(indexSource.includes("hasTodoObservation = false;"));
+	assert.ok(indexSource.includes("lastTodoObservationHasOpen = false;"));
+});
