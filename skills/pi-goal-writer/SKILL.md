@@ -69,6 +69,17 @@ Before returning a goal, verify it answers:
 - Does it define what to do when tests, credentials, network, data, or product decisions block progress?
 - Is it pasteable as one `/goal` command?
 
+## Verifying the goal workflow against logs
+
+When a goal-mode run must be verified (or a goal plugin version audited), verify against the ACTUAL session logs — never against agent summaries or prose. The session files (`~/.pi/agent/sessions/<project>/*.jsonl`) carry the goal events as `custom_message` entries with `customType: "pi-goal-event"` and `details.kind` in (`active`, `continuation`, `complete`, `paused`, `cleared`, `budget_limited`). Check:
+
+- **Continuation content**: the `content` of every `active`/`continuation`/`resumed` event must include the AGENTS.md + skills reminder ("follow the rules in the project's AGENTS.md (and CLAUDE.md where present), and read the relevant skills before acting"). A bare "Continue working toward the active thread goal." is the OLD pre-v0.2.0 message.
+- **Subagent withholding**: while ANY async subagent is pending, there must be ZERO `pi-goal-event` entries between the spawn and the last completion; the first continuation must arrive only after ALL pending runs complete (compare raw timestamps).
+- **Non-one-shotted goals**: a goal that cannot complete in one turn (e.g., a file-wait with "check exactly ONCE per turn, end your turn") must produce multiple `continuation` kind events across turns — the continuation mechanism drives each subsequent turn.
+- **Model**: the session `model_change` must be the intended provider/model (e.g., `ollama-cloud/deepseek-v4-flash:0731`), never a depleted fallback.
+
+Gotcha: a `pi -p` agent running goal tests may "fix" `.pi/agents/worker.md` to a wrong model (misdiagnosing the configured model as stale) and its auto-summaries can contradict the run meta. Always verify against the run's `*_meta.json` (`model`, `attemptedModels`, `error`) and the raw session log, not the agent's prose.
+
 ## Examples
 
 Weak:
