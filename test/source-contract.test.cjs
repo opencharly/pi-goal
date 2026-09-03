@@ -47,7 +47,7 @@ test("agent_end withholds continuation while a background subagent is pending", 
 	assert.ok(indexSource.includes('SUBAGENT_ASYNC_STARTED_EVENT = "subagent:async-started"'));
 	assert.ok(indexSource.includes('SUBAGENT_ASYNC_COMPLETE_EVENT = "subagent:async-complete"'));
 	assert.ok(indexSource.includes("pi.events?.on?.(SUBAGENT_ASYNC_STARTED_EVENT, markPendingSubagentLaunched)"));
-	assert.ok(indexSource.includes("if (hasPendingSubagentWork()) return;"));
+	assert.ok(indexSource.includes("hasPendingSubagentWork() || subagentLaunchThisTurn"));
 	const start = indexSource.indexOf('pi.on("agent_end"');
 	assert.ok(start >= 0, "agent_end handler present");
 	const end = indexSource.indexOf("\t});", start);
@@ -70,4 +70,17 @@ test("todo observations reset at session boundaries", () => {
 	assert.ok(indexSource.includes("pendingSubagentRuns.clear();"));
 	assert.ok(indexSource.includes("hasTodoObservation = false;"));
 	assert.ok(indexSource.includes("lastTodoObservationHasOpen = false;"));
+});
+
+test("launch-turn race is closed by a synchronous subagent-launch flag", () => {
+	assert.ok(indexSource.includes("let subagentLaunchThisTurn = false;"));
+	assert.ok(indexSource.includes("event.toolName === \"subagent\" && !event.args?.action"));
+	assert.ok(indexSource.includes("hasPendingSubagentWork() || subagentLaunchThisTurn"));
+	// the flag must reset at the start of every turn
+	assert.ok(indexSource.includes("subagentLaunchThisTurn = false;"));
+});
+
+test("unrecognized completion payloads no-op instead of clearing all pending runs", () => {
+	assert.ok(indexSource.includes("if (!id) return; // unrecognized payload"));
+	assert.ok(!indexSource.includes("else pendingSubagentRuns.clear(); // unrecognized payload"));
 });

@@ -40,6 +40,11 @@ const PENDING_SUBAGENT_STALE_MS = 4 * 60 * 60 * 1000;
 
 /** runId -> startedAt for background subagent runs that have not completed yet. */
 const pendingSubagentRuns = new Map<string, number>();
+/** True when the subagent tool launched a run in the current turn. Closes the
+ * event-bus race where `subagent:async-started` can arrive just after the
+ * launch turn's agent_end, which would otherwise let a stale continuation
+ * through that gets delivered late (possibly after the goal completed). */
+let subagentLaunchThisTurn = false;
 
 function runIdFromPayload(data: unknown): string | undefined {
 	if (!data || typeof data !== "object") return undefined;
@@ -58,8 +63,8 @@ function markPendingSubagentLaunched(data: unknown) {
 
 function markPendingSubagentResolved(data: unknown) {
 	const id = runIdFromPayload(data);
-	if (id) pendingSubagentRuns.delete(id);
-	else pendingSubagentRuns.clear(); // unrecognized payload — reset rather than block forever
+	if (!id) return; // unrecognized payload — leave the stale-entry TTL to reconcile
+	pendingSubagentRuns.delete(id);
 }
 
 function hasPendingSubagentWork(): boolean {
@@ -263,6 +268,14 @@ export default function piGoal(pi: ExtensionAPI) {
 	pi.events?.on?.(SUBAGENT_ASYNC_STARTED_EVENT, markPendingSubagentLaunched);
 	pi.events?.on?.(SUBAGENT_ASYNC_COMPLETE_EVENT, markPendingSubagentResolved);
 	pi.events?.on?.(SUBAGENT_PROCESS_TERMINAL_EVENT, markPendingSubagentResolved);
+	pi.on("tool_execution_start", (event) => {
+		// A subagent launch (no action) in this turn — async or foreground — means
+		// the agent may be waiting on it at agent_end; withhold even if the
+		// async-started bus event has not arrived yet (see subagentLaunchThisTurn).
+		if (event.toolName === "subagent" && !event.args?.action && (event.args?.agent || event.args?.workflowScript)) {
+			subagentLaunchThisTurn = true;
+		}
+	});
 	pi.on("tool_execution_end", (event) => {
 		if (event.toolName !== TODO_TOOL_NAME || event.isError) return;
 		hasTodoObservation = true;
@@ -492,6 +505,7 @@ export default function piGoal(pi: ExtensionAPI) {
 	pi.on("turn_start", (_event, _ctx) => {
 		activeTurnStartedAt = Date.now();
 		activeGoalThisTurnId = goal?.status === "active" ? goal.id : null;
+		subagentLaunchThisTurn = false;
 	});
 
 	pi.on("turn_end", (event, ctx) => {
@@ -516,7 +530,7 @@ export default function piGoal(pi: ExtensionAPI) {
 		// The agent is waiting on background subagent results — a "continue"
 		// continuation would pester it into parallel work; resume once the runs
 		// complete (and their results are processed in the following turn).
-		if (hasPendingSubagentWork()) return;
+		if (hasPendingSubagentWork() || subagentLaunchThisTurn) return;
 		queueContinuation(pi, goal);
 	});
 }
